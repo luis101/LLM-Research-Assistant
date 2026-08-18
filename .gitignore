@@ -1,0 +1,21 @@
+# Source PDFs — large, and usually not ours to redistribute
+pdfs/
+
+# Generated vector store (rebuilds from the PDFs; binary and large)
+chroma_db/
+
+# Secrets
+.env
+
+# Python
+__pycache__/
+*.py[cod]
+
+# Local virtualenv, if one is ever created inside the project
+.venv/
+
+# Claude's local data
+.claude/
+
+# .vscode settings
+.vscode/
