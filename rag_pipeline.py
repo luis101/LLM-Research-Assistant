@@ -8,10 +8,13 @@ Setup:
     pip install langchain-anthropic      # for --provider anthropic
     pip install langchain-openai         # for --provider openai
     pip install langchain-google-genai   # for --provider google
+    pip install langchain-xai            # for --provider xai
+    pip install langchain-ollama         # for --provider ollama
     Put your key(s) in a .env file next to this script (it is gitignored):
         ANTHROPIC_API_KEY=sk-ant-...
         OPENAI_API_KEY=sk-...
         GOOGLE_API_KEY=sk-...
+        XAI_API_KEY=sk-...
     Only the key for the provider you actually use is required.
 
 Usage:
@@ -19,7 +22,9 @@ Usage:
         python rag_pipeline.py                       # Claude (default)
         python rag_pipeline.py --provider openai     # GPT
         python rag_pipeline.py --provider google     # Gemini
+        python rag_pipeline.py --provider xai        # xAI
         python rag_pipeline.py --provider openai --model gpt-5.6-terra  # override default model for a provider
+        python rag_pipeline.py --provider ollama --model "gpt-oss:20b"
 
     The vector store is built once and persisted to ./chroma_db. To re-index
     after adding or changing PDFs, delete that folder and run again. Switching
@@ -51,6 +56,7 @@ PDF_DIR = "./pdfs"
 CHROMA_DIR = "./chroma_db"
 EMBEDDING_MODEL = "sentence-transformers/all-MiniLM-L6-v2"
 MAX_TOKENS = 4096
+NUM_PREDICT=1024
 RETRIEVE_K = 4
 
 # Chat providers for final answer generation. The default is Anthropic's Claude, the alternative is OpenAI's GPT models.
@@ -70,11 +76,24 @@ PROVIDERS = {
     "google": {
         "env_var": "GOOGLE_API_KEY",
         "package": "langchain-google-genai",
-        "default_model": "gemini-pro",
+        "default_model": "gemini-2.0-flash",
+    },
+    "xai": {
+        "env_var": "XAI_API_KEY",
+        "package": "langchain-xai",
+        "default_model": "grok-4",
+    },
+    # Ollama runs models locally (default http://localhost:11434) and needs no
+    # API key, so env_var is None. Set OLLAMA_HOST if your server is elsewhere.
+    # Model ids are name:tag (colon, not hyphen) and must be pulled first.
+    # Run `ollama list` to see what you have, or `ollama pull <id>` to add one.
+    "ollama": {
+        "env_var": None,
+        "package": "langchain-ollama",
+        "default_model": "qwen3.5:4b-q8_0",
     },
     # Override the default model for a provider by passing --model MODEL_ID on the command line.
 }
-
 
 def load_and_split(pdf_dir: str):
     """Load PDFs from the given directory and split them into chunks."""
@@ -109,7 +128,7 @@ def load_and_split(pdf_dir: str):
             skipped.append(f"{pdf_path.name}: No extractable text (scanned? needs OCR)")
 
     if skipped:
-        print("Warning: some PDFs contributed nothing to the index:", file=sys.stderr)
+        print("Warning: some PDFs contributed nothing:", file=sys.stderr)
         for item in skipped:
             print(f"  - {item}", file=sys.stderr)
 
@@ -174,10 +193,18 @@ def make_llm(provider: str, model: str | None = None):
 
     Only the package for the provider you actually use is needed, and the key is checked here.
     """
+    # argparse validates --provider, but not the default taken from LLM_PROVIDER,
+    # so an unknown value is still possible.
+    if provider not in PROVIDERS:
+        raise SystemExit(
+            f"Unknown provider {provider!r}. Choose from: {', '.join(sorted(PROVIDERS))}"
+        )
+
     cfg = PROVIDERS[provider]
     model = model or cfg["default_model"]
 
-    if not os.environ.get(cfg["env_var"]):
+    # env_var is None for providers that need no key (Ollama runs locally).
+    if cfg["env_var"] and not os.environ.get(cfg["env_var"]):
         raise SystemExit(
             f"{cfg['env_var']} not found. Put it in a .env file next to this script or set it in your environment."
         )
@@ -196,15 +223,32 @@ def make_llm(provider: str, model: str | None = None):
                 model=model, max_tokens=MAX_TOKENS, timeout=60, max_retries=2
             )
         elif provider == "google":
-            from langchain_google_genai import ChatGoogleGemini
+            from langchain_google_genai import ChatGoogleGenerativeAI
 
-            return ChatGoogleGemini(
+            return ChatGoogleGenerativeAI(
                 model=model, max_output_tokens=MAX_TOKENS, timeout=60, max_retries=2
             )
+        elif provider == "xai":
+            from langchain_xai import ChatXAI
+
+            return ChatXAI(
+                model=model, max_tokens=MAX_TOKENS, timeout=60, max_retries=2
+            )
+        elif provider == "ollama":
+            from langchain_ollama import ChatOllama
+
+            # Ollama calls the output cap num_predict, not max_tokens.
+            # reasoning=False matters for thinking models (qwen3, deepseek-r1, ...): 
+            # with it on, the model can spend the whole context window on internal reasoning, 
+            # hit the cap, and return an EMPTY answer.
+            return ChatOllama(model=model, num_predict=NUM_PREDICT, reasoning=False)
     except ImportError as exc:
         raise SystemExit(
-            f"Provider {provider!r} needs the {cfg['package']} package."
+            f"Provider {provider!r} could not be loaded from {cfg['package']}: {exc}\n"
+            f"If the package is missing: uv add {cfg['package']}"
         )
+
+    raise SystemExit(f"Provider {provider!r} has no constructor in make_llm().")
 
 
 def build_chain(vectorstore, llm):
