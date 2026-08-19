@@ -56,7 +56,7 @@ PDF_DIR = "./pdfs"
 CHROMA_DIR = "./chroma_db"
 EMBEDDING_MODEL = "sentence-transformers/all-MiniLM-L6-v2"
 MAX_TOKENS = 4096
-NUM_PREDICT=1024
+NUM_PREDICT = 2048
 RETRIEVE_K = 4
 
 # Chat providers for final answer generation. The default is Anthropic's Claude, the alternative is OpenAI's GPT models.
@@ -93,6 +93,37 @@ PROVIDERS = {
         "default_model": "qwen3.5:4b-q8_0",
     },
     # Override the default model for a provider by passing --model MODEL_ID on the command line.
+}
+
+# Built-in prompt templates, chosen with --prompt-style. Both must contain the
+# {context} and {question} placeholders; so must any --prompt-file you supply.
+#
+# "strict" keeps the model inside the retrieved excerpts, best when you need
+# every sentence traceable to a paper. "creative" lets it reason beyond them,
+# but insists that added material is labelled, so you can still tell which
+# claims came from your PDFs and which came from the model.
+DEFAULT_PROMPT_STYLE = "strict"
+PROMPT_STYLES = {
+    "strict": (
+        "Answer the question using only the context below. "
+        "If the answer isn't in the context, say politely that you don't know - don't guess. "
+        "Cite the source file and page for each claim.\n\n"
+        "Context:\n{context}\n\n"
+        "Question: {question}"
+    ),
+    "creative": (
+        "You are a research assistant. Treat the excerpts below as your primary evidence, "
+        "but you may also draw on your own knowledge to explain, connect, compare, and extend what they say, "
+        "including ideas, methods, or literature the excerpts do not mention.\n\n"
+        "Keep the two sources of information distinguishable:\n"
+        "- Cite the source file and page for anything taken from the excerpts.\n"
+        "- Mark anything from your own knowledge with 'Beyond the sources:', "
+        "so the reader never mistakes it for something the papers said.\n"
+        "- Say so explicitly when you are speculating or when the papers disagree with each other "
+        "or with the wider literature.\n\n"
+        "Excerpts:\n{context}\n\n"
+        "Question: {question}"
+    ),
 }
 
 def load_and_split(pdf_dir: str):
@@ -251,17 +282,35 @@ def make_llm(provider: str, model: str | None = None):
     raise SystemExit(f"Provider {provider!r} has no constructor in make_llm().")
 
 
-def build_chain(vectorstore, llm):
+def load_template(style: str, prompt_file: str | None) -> str:
+    """Return the prompt template text, from a file or a built-in style."""
+    if prompt_file:
+        path = Path(prompt_file)
+        try:
+            template = path.read_text(encoding="utf-8")
+        except OSError as exc:
+            raise SystemExit(f"Could not read prompt file {prompt_file!r}: {exc}")
+        source = f"file {path.name}"
+    else:
+        template = PROMPT_STYLES[style]
+        source = f"style {style!r}"
+
+    # The chain expects both {context} and {question} placeholders to be present in the prompt template, 
+    # a template missing either would fail at invoke time with a much less obvious error.
+    missing = [v for v in ("{context}", "{question}") if v not in template]
+    if missing:
+        raise SystemExit(
+            f"Prompt from {source} is missing the placeholder(s): {', '.join(missing)}. "
+            "A prompt template must contain both {context} and {question}."
+        )
+    return template
+
+
+def build_chain(vectorstore, llm, template: str):
     """Build a RAG chain that retrieves relevant chunks and generates an answer."""
     retriever = vectorstore.as_retriever(search_kwargs={"k": RETRIEVE_K})
 
-    prompt = ChatPromptTemplate.from_template(
-        "Answer the question using only the context below. "
-        "If the answer isn't in the context, say politely that you don't know - don't guess. "
-        "Cite the source file and page for each claim.\n\n"
-        "Context:\n{context}\n\n"
-        "Question: {question}"
-    )
+    prompt = ChatPromptTemplate.from_template(template)
 
     # Format the retrieved documents into a string that includes the source and page number for each chunk
     def format_docs(docs):
@@ -294,18 +343,38 @@ def parse_args():
         default=None,
         help="Override the provider's default model id.",
     )
+    parser.add_argument(
+        "--prompt-style",
+        choices=sorted(PROMPT_STYLES),
+        default=os.environ.get("PROMPT_STYLE", DEFAULT_PROMPT_STYLE),
+        help=(
+            "strict: answer only from the PDFs. creative: also use the model's "
+            "own knowledge, labelled separately (default: %(default)s)."
+        ),
+    )
+    parser.add_argument(
+        "--prompt-file",
+        default=None,
+        metavar="PATH",
+        help=(
+            "Use a custom prompt template from a text file instead of a built-in "
+            "style. Must contain the {context} and {question} placeholders."
+        ),
+    )
     return parser.parse_args()
 
 
 def main():
     args = parse_args()
 
-    # Fail on a missing key before spending time embedding or loading models.
+    # Fail on a missing key or a broken prompt before spending time embedding.
     llm = make_llm(args.provider, args.model)
-    print(f"Provider: {args.provider} ({llm.model})")
+    template = load_template(args.prompt_style, args.prompt_file)
+    prompt_desc = args.prompt_file or args.prompt_style
+    print(f"Provider: {args.provider} ({llm.model}) | prompt: {prompt_desc}")
 
     vectorstore = get_vectorstore()
-    chain = build_chain(vectorstore, llm)
+    chain = build_chain(vectorstore, llm, template)
 
     print("\nReady. Ask questions about your PDFs (type 'quit' to exit).")
     while True:
