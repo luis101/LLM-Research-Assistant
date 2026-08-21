@@ -48,6 +48,7 @@ from langchain_huggingface import HuggingFaceEmbeddings
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 from pypdf import PdfReader
 
+
 # Read API keys (and anything else) from a local .env file if present.
 # .env is gitignored, so keys stay out of version control.
 load_dotenv()
@@ -61,24 +62,24 @@ RETRIEVE_K = 4
 
 # Chat providers for final answer generation. The default is Anthropic's Claude, the alternative is OpenAI's GPT models.
 # Embeddings stay local, so switching provider never invalidates the vector store.
-DEFAULT_PROVIDER = "anthropic"
+DEFAULT_PROVIDER = "Ollama"
 PROVIDERS = {
-    "anthropic": {
+    "Anthropic": {
         "env_var": "ANTHROPIC_API_KEY",
         "package": "langchain-anthropic",
         "default_model": "claude-opus-5",
     },
-    "openai": {
+    "OpenAI": {
         "env_var": "OPENAI_API_KEY",
         "package": "langchain-openai",
         "default_model": "gpt-5.6-terra",
     },
-    "google": {
+    "Google": {
         "env_var": "GOOGLE_API_KEY",
         "package": "langchain-google-genai",
         "default_model": "gemini-2.0-flash",
     },
-    "xai": {
+    "XAI": {
         "env_var": "XAI_API_KEY",
         "package": "langchain-xai",
         "default_model": "grok-4",
@@ -87,7 +88,7 @@ PROVIDERS = {
     # API key, so env_var is None. Set OLLAMA_HOST if your server is elsewhere.
     # Model ids are name:tag (colon, not hyphen) and must be pulled first.
     # Run `ollama list` to see what you have, or `ollama pull <id>` to add one.
-    "ollama": {
+    "Ollama": {
         "env_var": None,
         "package": "langchain-ollama",
         "default_model": "qwen3.5:4b-q8_0",
@@ -102,16 +103,16 @@ PROVIDERS = {
 # every sentence traceable to a paper. "creative" lets it reason beyond them,
 # but insists that added material is labelled, so you can still tell which
 # claims came from your PDFs and which came from the model.
-DEFAULT_PROMPT_STYLE = "strict"
+DEFAULT_PROMPT_STYLE = "Strict"
 PROMPT_STYLES = {
-    "strict": (
+    "Strict": (
         "Answer the question using only the context below. "
         "If the answer isn't in the context, say politely that you don't know - don't guess. "
         "Cite the source file and page for each claim.\n\n"
         "Context:\n{context}\n\n"
         "Question: {question}"
     ),
-    "creative": (
+    "Creative": (
         "You are a research assistant. Treat the excerpts below as your primary evidence, "
         "but you may also draw on your own knowledge to explain, connect, compare, and extend what they say, "
         "including ideas, methods, or literature the excerpts do not mention.\n\n"
@@ -241,31 +242,31 @@ def make_llm(provider: str, model: str | None = None):
         )
 
     try:
-        if provider == "anthropic":
+        if provider == "Anthropic":
             from langchain_anthropic import ChatAnthropic
 
             return ChatAnthropic(
                 model=model, max_tokens=MAX_TOKENS, timeout=60, max_retries=2
             )
-        elif provider == "openai":
+        elif provider == "OpenAI":
             from langchain_openai import ChatOpenAI
 
             return ChatOpenAI(
                 model=model, max_tokens=MAX_TOKENS, timeout=60, max_retries=2
             )
-        elif provider == "google":
+        elif provider == "Google":
             from langchain_google_genai import ChatGoogleGenerativeAI
 
             return ChatGoogleGenerativeAI(
                 model=model, max_output_tokens=MAX_TOKENS, timeout=60, max_retries=2
             )
-        elif provider == "xai":
+        elif provider == "XAI":
             from langchain_xai import ChatXAI
 
             return ChatXAI(
                 model=model, max_tokens=MAX_TOKENS, timeout=60, max_retries=2
             )
-        elif provider == "ollama":
+        elif provider == "Ollama":
             from langchain_ollama import ChatOllama
 
             # Ollama calls the output cap num_predict, not max_tokens.
@@ -282,9 +283,12 @@ def make_llm(provider: str, model: str | None = None):
     raise SystemExit(f"Provider {provider!r} has no constructor in make_llm().")
 
 
-def load_template(style: str, prompt_file: str | None) -> str:
-    """Return the prompt template text, from a file or a built-in style."""
-    if prompt_file:
+def load_template(style: str, prompt_file: str | None, prompt_text: str | None = None) -> str:
+    """Return the prompt template: raw text, a file, or a built-in style."""
+    if prompt_text:
+        template = prompt_text
+        source = "the custom prompt"
+    elif prompt_file:
         path = Path(prompt_file)
         try:
             template = path.read_text(encoding="utf-8")

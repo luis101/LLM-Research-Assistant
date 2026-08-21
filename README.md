@@ -65,6 +65,24 @@ contribute nothing (the script warns you by filename when this happens).
 
 ## Usage
 
+There are two front ends over the same pipeline: a web dashboard and a CLI.
+
+### Dashboard (recommended)
+
+```bash
+uv run streamlit run dashboard.py
+```
+
+Opens at `http://localhost:8501`. Choose the provider, model, and prompt style
+at the top of the page, then ask questions in the chat box. The conversation is
+kept until you press **Clear chat**, and a custom prompt can be typed directly
+into a text area. Add `--server.headless true` to suppress the auto-opened browser.
+
+The vector store and the model connection are cached across interactions, so
+only the first question pays the ~15-20s setup cost. Changing provider or model reconnects without re-indexing.
+
+### CLI
+
 ```bash
 uv run python rag_pipeline.py
 ```
@@ -73,21 +91,26 @@ The first run builds the vector store (a few minutes for a few dozen papers);
 later runs reuse it and start immediately. Then ask questions at the prompt,
 and type `quit` to exit.
 
+The options below apply to the CLI; the dashboard exposes the same choices as
+widgets.
+
 ### Choosing a model
 
 ```bash
-uv run python rag_pipeline.py --provider openai
-uv run python rag_pipeline.py --provider ollama        
-uv run python rag_pipeline.py --provider openai --model gpt-5.6 terra
+uv run python rag_pipeline.py --provider OpenAI
+uv run python rag_pipeline.py --provider Ollama
+uv run python rag_pipeline.py --provider OpenAI --model gpt-5.6-terra
 ```
+
+Provider names are case-sensitive and match the keys below.
 
 | `--provider` | Key | Package |
 |---|---|---|
-| `anthropic` | `ANTHROPIC_API_KEY` | `langchain-anthropic` |
-| `openai` | `OPENAI_API_KEY` | `langchain-openai` |
-| `google` | `GOOGLE_API_KEY` | `langchain-google-genai` |
-| `xai` | `XAI_API_KEY` | `langchain-xai` |
-| `ollama` | *(none — runs locally)* | `langchain-ollama` |
+| `Anthropic` | `ANTHROPIC_API_KEY` | `langchain-anthropic` |
+| `OpenAI` | `OPENAI_API_KEY` | `langchain-openai` |
+| `Google` | `GOOGLE_API_KEY` | `langchain-google-genai` |
+| `XAI` | `XAI_API_KEY` | `langchain-xai` |
+| `Ollama` | *(none — runs locally)* | `langchain-ollama` |
 
 Each provider's default model id is noted in the `PROVIDERS` dict in
 `rag_pipeline.py`. Model line-ups change often, so check the provider's current
@@ -97,14 +120,14 @@ caught at startup, it results in an error on the first question.
 ### Choosing how the model answers
 
 ```bash
-uv run python rag_pipeline.py --prompt-style creative
+uv run python rag_pipeline.py --prompt-style Creative
 uv run python rag_pipeline.py --prompt-file my_prompt.txt
 ```
 
 | Style | Behaviour |
 |---|---|
-| `strict` (default) | Answers **only** from the retrieved excerpts. Says that it doesn't know rather than to guess. Every claim can be traced back to a paper. |
-| `creative` | Also draws on the model's own knowledge to explain, compare, and extend, but labels those additions `Beyond the sources:` and flags speculation, so it is always clear what came from the PDFs. |
+| `Strict` (default) | Answers **only** from the retrieved excerpts. Says that it doesn't know rather than to guess. Every claim can be traced back to a paper. |
+| `Creative` | Also draws on the model's own knowledge to explain, compare, and extend, but labels those additions `Beyond the sources:` and flags speculation, so it is always clear what came from the PDFs. |
 
 `--prompt-file` takes any text file as the template. It must contain both
 `{context}` and `{question}` placeholders; this is checked at startup, before
@@ -169,7 +192,8 @@ the model choice and the output cap matter far more than corpus size.
 ```
 pdfs/            source PDFs (gitignored)
 chroma_db/       persisted vector store (gitignored, rebuildable)
-rag_pipeline.py  the whole pipeline
+rag_pipeline.py  the pipeline + CLI
+dashboard.py     Streamlit UI over the same pipeline
 pyproject.toml   dependencies
 .env             API keys (gitignored)
 ```
