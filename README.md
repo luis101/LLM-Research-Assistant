@@ -74,9 +74,9 @@ uv run streamlit run dashboard.py
 ```
 
 Opens at `http://localhost:8501`. Choose the provider, model, and prompt style
-at the top of the page, then ask questions in the chat box. The conversation is
-kept until you press **Clear chat**, and a custom prompt can be typed directly
-into a text area. Add `--server.headless true` to suppress the auto-opened browser.
+at the top of the page, then ask questions in the chat box. The conversation with 
+the chat-bot is kept until you press **Clear chat**, and a custom prompt can be typed 
+directly into a text area. Add `--server.headless true` to suppress the auto-opened browser.
 
 The vector store and the model connection are cached across interactions, so
 only the first question pays the ~15-20s setup cost. Changing provider or model reconnects without re-indexing.

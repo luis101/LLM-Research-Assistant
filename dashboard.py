@@ -15,9 +15,10 @@ from rag_pipeline import (
 
 CUSTOM_PROMPT = "Custom"
 
-# Interactive Page Configuration
+### Interactive Page Configuration ###
+    
 st.set_page_config(page_title="LLM Research Assistant", layout="wide")
-st.title("Research Assistant: Ask Questions About Research Papers and Get Ideas")
+st.title("Research Assistant: Ask Questions About Research and Get Practical Ideas")
 
 # Streamlit re-runs the whole script on every interaction, so anything expensive must be cached 
 # or it is repeated with every question. Loading the embedding model alone takes approximately 15-20s.
@@ -55,6 +56,14 @@ if prompt_style == CUSTOM_PROMPT:
     if not prompt_text:
         st.info("Enter a prompt template.")
         st.stop()
+else:
+    st.text_area("Prompt in use", 
+                 value=PROMPT_STYLES[prompt_style],
+                 height=200, disabled=True)
+
+### Chat Interface ###
+
+st.subheader("Chat")
 
 if st.button("Clear chat"):
     st.session_state.history = []
@@ -72,7 +81,7 @@ except SystemExit as exc:
 vectorstore = cached_vectorstore()
 chain = build_chain(vectorstore, llm, template)
 
-st.write(f"Provider: {provider} ({llm.model}) | Prompt Type: {prompt_style}")
+st.write(f"Provider (Model): {provider} ({llm.model}) | Prompt Type: {prompt_style}")
 
 # Keep the conversation instead of replacing the previous answer each time
 if "history" not in st.session_state:
